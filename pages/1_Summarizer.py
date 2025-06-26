@@ -29,10 +29,10 @@ text = "\n".join(full_text)
 # Split documents into manageable chunks
 
 # Initialize Ollama LLM via LangChain
-llm = Ollama(
-    base_url="http://localhost:11434",  # Default Ollama endpoint
-    model="llama3.1"
-)
+# llm = Ollama(
+#     base_url="http://localhost:11434",  # Default Ollama endpoint
+#     model="llama3.1"
+# )
 
 
 prompt_template = """You are a helpful, meeting summarizing assistant. Summarize the following meeting transcript: {text}, along with an English translation of
