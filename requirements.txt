@@ -1,11 +1,11 @@
-streamli
+streamlit
 openai
 langchain
 chroma
 pyPDF2
 ollama
-streamlit
-llama-3.1
 requests
 numpy
 pandas
+langchain_community
+python-docx
