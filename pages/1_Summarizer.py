@@ -37,9 +37,9 @@ llm = Ollama(
 
 prompt_template = """You are a helpful, meeting summarizing assistant. Summarize the following meeting transcript: {text}, along with an English translation of
 the summary, using the Cornell Notes technique. Provide the summary in English. Make sure to expand upon each discussion point and provide a detailed summary of the meeting."""
-response = llm.invoke(prompt_template.format(text=text), temperature=0.65, max_tokens=2000)
+# response = llm.invoke(prompt_template.format(text=text), temperature=0.65, max_tokens=2000)
 
-st.write(response)
+# st.write(response)
 # st.set_page_config(page_title="Llama 3.1 Chat", page_icon="🤖")
 # st.title("💬 Llama 3.1 Chat (via Ollama & LangChain)")
 
