@@ -1,8 +1,12 @@
 import streamlit as st
 import os
+from vector_db import initialize_vector_db_if_needed
 
 st.set_page_config(page_title="AI Summarizer", layout="wide")
 st.title("📄 AI Meeting Summarizer")
+
+# Initialize vector database on app startup
+vector_db = initialize_vector_db_if_needed()
 
 # Inject custom CSS for better button styling
 st.markdown("""

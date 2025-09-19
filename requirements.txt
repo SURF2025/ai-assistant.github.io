@@ -1,7 +1,9 @@
 streamlit
 openai
 langchain
-chroma
+chromadb
+sentence-transformers
+PyMuPDF
 pyPDF2
 ollama
 requests

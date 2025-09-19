@@ -3,6 +3,7 @@ import os
 import fitz  # PyMuPDF
 import requests
 import base64
+from vector_db import get_vector_db, retrieve_relevant_context
 
 # ⬅️ Back button
 if st.button("⬅️ Back to Home"):
@@ -48,6 +49,13 @@ def extract_text_from_pdf(path):
 transcript_text = extract_text_from_pdf(transcript_path)
 word_count = len(transcript_text.split())
 
+# Check if this meeting is in the vector database
+vector_db = get_vector_db()
+if vector_db and meeting_file in vector_db.get_all_filenames():
+    st.success("✅ Meeting indexed for smart retrieval")
+else:
+    st.warning("⚠️ Meeting not yet indexed - using full transcript for chat")
+
 # 🌐 Session state for summary and chat
 if "summary" not in st.session_state:
     st.session_state["summary"] = ""
@@ -92,71 +100,199 @@ st.markdown("""
 with st.expander("📄 View full transcript"):
     st.text_area("Transcript", transcript_text, height=300)
 
-# 🚀 Run summarization
-if st.button("🧠 Summarize", type="primary"):
-    with st.spinner("Generating summary..."):
-            prompt = f"""
-You are a clear-thinking, detail-oriented meeting assistant. You're a professional assistant. You do not apologize. Always provide your best answer, even with long or imperfect inputs.
+# Dictionary of button labels and their corresponding prompts
+# Note: Summaries use full transcript for completeness, but chat uses vector retrieval for efficiency
+summarization_options = {
+    "📝 Cornell Notes": """
+You are a meeting assistant. Create a Cornell Notes summary immediately.
 
-OBJECTIVE:
-Help generate a professional summary of this transcript for absent team members.
+STRICT INSTRUCTIONS:
+- Do NOT comment on text length or complexity
+- Do NOT use phrases like "I'm sorry", "appears to", "seems like"
+- Start IMMEDIATELY with the Cornell Notes format
+- Use ONLY information from the transcript
 
-CONSTRAINTS:
-- Use Cornell Notes structure.
-- Include participants, key topics, decisions, action items (with persons), and unresolved issues.
-- Use only info from the transcript. No opinions. No outside facts.
+FORMAT (follow exactly):
+PARTICIPANTS:
+• [List each person and their role]
 
-FORMAT:
-- Bullet points or short paragraphs.
-- Plain text only. No Markdown.
+NOTES:
+• [Key discussion points]
+• [Important decisions made]
+• [Technical details discussed]
+
+CUES:
+• [Main topics/keywords]
+• [Action items]
+• [Deadlines mentioned]
+
+SUMMARY:
+[2-3 sentences covering the main outcomes and next steps]
+
+LANGUAGE: Always respond in the language of the transcript.
+
+TRANSCRIPT:
+{transcript_text}
+""",
+    
+    "📝 1 to 1 Meeting": """
+You are an expert in meeting notes. I am having a 1:1 meeting with someone in my team, please capture these meeting notes in a concise and actionable format. Focus on immediate priorities, progress, challenges, and personal feedback, ensuring the notes are structured for clarity, efficiency and easy follow-up. Please highlight key phrases and organize content hierarchically in the generated notes.
+
+RULES:
+- No preamble or explanatory text
+- Start directly with the meeting content
+- Focus on actionable items and feedback
+- Organize hierarchically with clear structure
+- Highlight key phrases
+
+LANGUAGE: Always respond in the language of the transcript.
+
+TRANSCRIPT:
+{transcript_text}
+""",
+    
+    "📋 Meeting Summary": """
+Summarize given text into a well-formed meeting summary, and present the results using markdown format. Please highlight key phrases in the generated notes. Do not show results that cannot be generated.
+
+RULES:
+- Use markdown format for structure
+- Highlight key phrases
+- Present clear, well-formed summary
+- Only include content that can be generated from the transcript
+
+LANGUAGE: Always respond in the language of the transcript.
+
+TRANSCRIPT:
+{transcript_text}
+""",
+    
+    "🧠 Feynman Tech": """
+Turn the given text into a detailed study note using Feynman Technique to help the user to achieve a deep and intuitive understanding of the topic. The output should include a clear, simplified explanation of the topic, identification, and resolution of knowledge gaps, and a refined explanation that is ready for teaching. Each step should be documented thoroughly to ensure a comprehensive understanding. Please highlight key phrases and organize content hierarchically in the generated notes.
+
+RULES:
+- Apply Feynman Technique methodology
+- Create detailed study notes for deep understanding
+- Include simplified explanations and knowledge gap resolution
+- Document each step thoroughly
+- Highlight key phrases and organize hierarchically
+
+LANGUAGE: Always respond in the language of the transcript.
+
+TRANSCRIPT:
+{transcript_text}
+""",
+    
+    "� Project Sync": """
+You are an expert in meeting notes. I participated in our project sync to get a clear picture of where we stand and what's coming up. My focus was on understanding our progress, identifying any hurdles, and ensuring we're all aligned on our next moves to keep things on track. Please highlight key phrases and organize content hierarchically in the generated notes.
+
+RULES:
+- Focus on project progress and alignment
+- Identify hurdles and next steps
+- Organize hierarchically with clear structure
+- Highlight key phrases for easy reference
+
+LANGUAGE: Always respond in the language of the transcript.
+
+TRANSCRIPT:
+{transcript_text}
+""",
+    
+    "� Brainstorming": """
+Summarize given text into a well-formed Brainstorm Notes, and present the results as follows use markdown format:
+## Ideas 1
+#### Key Concepts
+#### Pros & Cons
+#### Examples
+## Ideas ...
+#### Key Concepts
+#### Pros & Cons
+#### Examples
+## Exploration
+Please highlight key phrases and organize content hierarchically in the generated notes. Do not show results that cannot be generated.
+
+RULES:
+- Use the specified markdown format structure
+- Organize ideas with key concepts, pros & cons, and examples
+- Include exploration section
+- Highlight key phrases
+- Only show results that can be generated
+
+LANGUAGE: Always respond in the language of the transcript.
 
 TRANSCRIPT:
 {transcript_text}
 """
-            payload = {
-                "model": "llama3.1:latest",
-                "model_config": {
-                    "max_tokens": 1000,
-                    "temperature": 0.5,
-                    "top_p": 0.9,
-                },
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False
-            }
+}
 
-            try:
-                response = requests.post("http://localhost:11434/api/chat", json=payload)
-                if response.status_code == 200:
-                    st.session_state["summary"] = response.json().get("message", {}).get("content", "")
-                else:
-                    st.error("⚠️ Ollama inference failed.")
-            except Exception as e:
-                st.error(f"⚠️ Error contacting Ollama: {e}")
+# 🚀 Show initial summarization buttons ONLY if no summary has been generated yet
+if not st.session_state["summary"]:
+    st.subheader("🧠 Choose Summarization Style")
+    
+    # Create inline buttons with unique keys
+    cols = st.columns(len(summarization_options))
+    for i, (label, prompt_template) in enumerate(summarization_options.items()):
+        with cols[i]:
+            if st.button(label, type="secondary", use_container_width=True, key=f"initial_{i}"):
+                with st.spinner(f"Generating {label.split(' ')[1]} summary..."):
+                    prompt = prompt_template.format(transcript_text=transcript_text)
+                    
+                    payload = {
+                        "model": "llama3.1:latest",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False
+                    }
 
-# 🧾 Show summary
-if st.session_state["summary"]:
-    st.subheader("✅ Summary")
-    st.markdown(st.session_state["summary"])
+                    try:
+                        response = requests.post("http://localhost:11434/api/chat", json=payload)
+                        if response.status_code == 200:
+                            summary_content = response.json().get("message", {}).get("content", "")
+                            
+                            # Add summary to chat history as assistant message
+                            st.session_state.chat_history.append({
+                                "role": "assistant", 
+                                "content": f"**{label}**\n\n{summary_content}",
+                                "type": "summary"
+                            })
+                            
+                            # Set the main summary for backward compatibility
+                            st.session_state["summary"] = summary_content
+                            st.session_state["summary_type"] = label
+                            
+                            st.rerun()  # Refresh to show new message
+                        else:
+                            st.error("⚠️ Ollama inference failed.")
+                    except Exception as e:
+                        st.error(f"⚠️ Error contacting Ollama: {e}")
 
-    # 💬 Chat Interface
+# 💬 Chat Interface - show if there's any chat history or summary
+if st.session_state["summary"] or st.session_state.chat_history:
     st.markdown("---")
     st.subheader("🤖 Chat with the AI about this meeting")
 
+    # Display existing chat history (including summaries)
     for entry in st.session_state.chat_history:
         with st.chat_message(entry["role"]):
             st.markdown(entry["content"])
 
     user_input = st.chat_input("Ask a question about the meeting...")
     if user_input:
+        # Add user message to history
         st.session_state.chat_history.append({"role": "user", "content": user_input})
+        
+        # Display user message immediately
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
         with st.spinner("Thinking..."):
+            # Use vector database to retrieve relevant context instead of full transcript
+            relevant_context = retrieve_relevant_context(user_input, meeting_file, top_k=3)
+            
             chat_prompt = f"""
-You're a helpful assistant. Answer based only on the transcript below.
+Answer the question directly based only on the relevant meeting content below. Do not use phrases like "based on the transcript" or "it appears". Start immediately with your answer.
 
-TRANSCRIPT:
+RELEVANT MEETING CONTENT:
 \"\"\"
-{transcript_text}
+{relevant_context}
 \"\"\"
 
 QUESTION:
@@ -174,6 +310,7 @@ QUESTION:
                 if response.status_code == 200:
                     reply = response.json().get("message", {}).get("content", "")
                     st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                    # Display assistant response immediately
                     with st.chat_message("assistant"):
                         st.markdown(reply)
                 else:
@@ -181,10 +318,45 @@ QUESTION:
             except Exception as e:
                 st.error(f"⚠️ Error contacting Ollama: {e}")
 
+# 🚀 Show summarization buttons at the END if a summary has been generated
+if st.session_state.get("summary"):
+    st.markdown("---")
+    st.subheader("🧠 Generate Another Summary")
+    
+    # Create inline buttons with unique keys
+    cols = st.columns(len(summarization_options))
+    for i, (label, prompt_template) in enumerate(summarization_options.items()):
+        with cols[i]:
+            # Use unique keys to avoid button conflicts
+            button_key = f"end_{i}_{len(st.session_state.chat_history)}"
+            if st.button(label, type="secondary", use_container_width=True, key=button_key):
+                with st.spinner(f"Generating {label.split(' ')[1]} summary..."):
+                    prompt = prompt_template.format(transcript_text=transcript_text)
+                    
+                    payload = {
+                        "model": "llama3.1:latest",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False
+                    }
 
-
-
-
+                    try:
+                        response = requests.post("http://localhost:11434/api/chat", json=payload)
+                        if response.status_code == 200:
+                            summary_content = response.json().get("message", {}).get("content", "")
+                            
+                            # Add summary to chat history as assistant message
+                            st.session_state.chat_history.append({
+                                "role": "assistant", 
+                                "content": f"**{label}**\n\n{summary_content}",
+                                "type": "summary"
+                            })
+                            
+                            st.rerun()  # Refresh to show new message
+                        else:
+                            st.error("⚠️ Ollama inference failed.")
+                    except Exception as e:
+                        st.error(f"⚠️ Error contacting Ollama: {e}")
+                        # Remove the expandable sections code completely
 
 
 
